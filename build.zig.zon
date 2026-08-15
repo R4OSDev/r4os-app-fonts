@@ -1,0 +1,23 @@
+.{
+    .name = .r4os_fonts,
+    .version = "0.1.2",
+    .fingerprint = 0xfe597168e2d8b5a4,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .r4os_sdk = .{
+            .url = "https://github.com/R4OSDev/r4os-sdk/archive/418f49a795bcff0177fa622dddab57262bf503ed.tar.gz",
+            .hash = "r4os_sdk-0.64.17-NnPzAkJv7gBwJAoIcSZyXzHimQXv3t6e-4EyuzU2ZoAn",
+        },
+        .r4os_libraries = .{
+            .url = "https://github.com/R4OSDev/r4os-libraries/archive/9d93fb9d9a5321aa970b5086fba8700562736a9a.tar.gz",
+            .hash = "r4os_libraries-0.64.17-dH4fNQrwhgDeMaPv1MofO1GFcS87X_SrXaLw4JWBAd3O",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "module.R4MF",
+        "src",
+        "PROVENANCE.txt",
+    },
+}
