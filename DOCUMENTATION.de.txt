@@ -3,3 +3,34 @@
 
 Eigenstaendiges R4OS-Anwendungsrepository. Build und Imageziel werden durch
 module.R4MF beschrieben. Lokale Pfade stehen in Settings.R4S.
+
+Schriftlader ab 0.78.65
+----------------------
+Kernel 0.1.129 prueft BDAT-/GMET-/GMAP-Datensatzanzahlen per verbleibender
+Tabellenlaenge, bevor er sie multipliziert. Bitmap-Payload beginnt hinter
+den vollstaendigen Datensaetzen; Glyphenindizes bleiben innerhalb der
+angegebenen Glyphenanzahl. Headergroesse muss in die deklarierte Datei passen.
+Die Differenz der i16-Glyphenkoordinaten wird als i32 berechnet. Negative oder
+mehr als 40 Pixel breite Boxen werden als unbrauchbare Bitmapmetrik abgewiesen.
+Fehlerhafte Fonts bleiben als nicht renderbare Katalogeintraege sichtbar;
+der bekannte Ersatzfont und nachfolgende gueltige Eintraege bleiben benutzbar.
+Die Katalogveroeffentlichung aus 0.78.49 bleibt bestehen.
+
+R4FONTs FNT-Import uebergibt jede Bitmap genau einmal an owned_glyphs. Nach
+dem erfolgreichen Append ist der lokale errdefer deaktiviert; scheitert die
+folgende RasterGlyph-Listenallokation, raeumt ausschliesslich der Besitzer auf.
+Dies gilt fuer V1-Bitmap, V1-Vektor und V2/V3. FON-/NE-Header, Ressourcentabellen
+und verschobene Ressourcengroessen werden mit breiter, gepruefter Arithmetik
+an die Eingabelaenge gebunden. Verschiebungen ausserhalb der Zielbreite oder
+mit verloren gehenden Bits werden abgewiesen. FONTS 0.1.4 bindet diese korrigierte
+Importlogik ein. Der R4FONT 0.2.2-Decoder verlangt 20 Bytes, bevor er das WOFF-/
+WOFF2-Groessenfeld ab Offset 16 liest. Eingaben mit 18/19 Bytes bleiben unabhaengig
+vom nachfolgenden Byte. API, Tabellenlayouts und Fremdbibliotheken sind gleich.
+Der Bytebestand der eigenen Bridge ist im vorhandenen Vendormanifest erneuert.
+
+Gezielte Nachweise: kleine 344-Byte-R4F-Datei und Count-/Koordinaten-/Payload-
+Varianten, ein 138-Byte-FNT mit genau dem dritten abgewiesenen Speicherabruf,
+ein 64-Byte-FON mit e_lfanew=FFFFFFFF sowie gepolsterte WOFF/WOFF2-Daten mit
+logischer Laenge 18/19. Vier gebuendelte Hostfaelle, bestehender R4FONT-Build
+und Vendorcheck; ein kurzer SMP4-Gast mit privatem Katalog aus einer gueltigen
+und vier fehlerhaften Dateien inklusive Reload. Keine Font-Profile/Langlaeufe.
