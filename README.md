@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.1.4`
+- Version: `0.1.5`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/FONTS.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
@@ -51,3 +51,12 @@ No decoder API, interface layout or upstream library version changes.
 The existing vendor byte manifest records the corrected local bridge.
 Focused checks reuse the small R4F/FNT/FON/WOFF examples; no raster profiles
 or long font runs are added.
+
+GUI activity (0.81.18)
+---------------------
+Fonts uses the shared SDK EventLoop without application timers. Queued
+input is handled before waiting; Close and wait failures unwind the source
+font allocation. Input, font changes and resize trigger repaint; irrelevant
+clicks retain the current frame. The app uses the full hosted client size.
+The shared kernel activity wait still has its existing 250-ms safety slice
+and wakes for other desktop activity; Fonts adds no periodic idle timer.

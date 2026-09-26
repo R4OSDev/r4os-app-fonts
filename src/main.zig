@@ -66,10 +66,17 @@ const App = struct {
         self.updateMetrics();
         self.render();
 
+        var events = r4os.EventLoop.init(self.ctx.sys, self.ctx.desk, &.{});
         while (!self.ctx.sys.programShouldClose()) {
-            var event: r4os.abi.GuiEvent = .{};
-            while (self.ctx.desk.guiPollEvent(&event) > 0) self.handleEvent(event);
-            self.ctx.sys.sleepTicks(2);
+            switch (events.wait(r4os.time_contract.timeoutForever())) {
+                .message => |message| {
+                    const event = message.guiEvent() orelse continue;
+                    if (event.kind == @intFromEnum(r4os.abi.GuiEventKind.close)) return 0;
+                    self.handleEvent(event);
+                },
+                .failure => |raw| return raw,
+                .timed_out => {},
+            }
         }
         return 0;
     }
@@ -94,11 +101,14 @@ const App = struct {
 
     fn handleKey(self: *App, key: u8) void {
         switch (key) {
-            r4os.gui.Key.escape => _ = self.ctx.desk.guiSetTitle("Fonts"),
-            r4os.gui.Key.left => self.changeSourceFace(-1),
-            r4os.gui.Key.right => self.changeSourceFace(1),
-            r4os.gui.Key.up => self.changeInstalledFont(-1),
-            r4os.gui.Key.down => self.changeInstalledFont(1),
+            r4os.gui.Key.escape => {
+                _ = self.ctx.desk.guiSetTitle("Fonts");
+                return;
+            },
+            r4os.gui.Key.left => if (!self.changeSourceFace(-1)) return,
+            r4os.gui.Key.right => if (!self.changeSourceFace(1)) return,
+            r4os.gui.Key.up => if (!self.changeInstalledFont(-1)) return,
+            r4os.gui.Key.down => if (!self.changeInstalledFont(1)) return,
             r4os.gui.Key.enter => self.installAllFaces(),
             r4os.gui.Key.delete => self.removeSelectedFont(),
             else => return,
@@ -110,15 +120,15 @@ const App = struct {
         var info: r4os.abi.GuiWindowInfo = .{};
         _ = self.ctx.desk.guiWindowInfo(&info);
         const canvas = r4os.gui.Canvas.init(&self.ctx.draw, info);
-        self.width = clamp(canvas.w, 420, 900);
-        self.height = clamp(canvas.h, 280, 700);
+        self.width = @max(canvas.w, 420);
+        self.height = @max(canvas.h, 280);
     }
 
     fn handleClick(self: *App, x: i32, y: i32) void {
         if (self.sourcePrevRect().contains(x, y)) {
-            self.changeSourceFace(-1);
+            if (!self.changeSourceFace(-1)) return;
         } else if (self.sourceNextRect().contains(x, y)) {
-            self.changeSourceFace(1);
+            if (!self.changeSourceFace(1)) return;
         } else if (self.installRect().contains(x, y)) {
             self.installAllFaces();
         } else if (self.removeRect().contains(x, y)) {
@@ -126,10 +136,11 @@ const App = struct {
         } else if (self.fontListRect().contains(x, y)) {
             const row = @divTrunc(y - self.fontListRect().y, 18);
             if (row >= 0 and @as(usize, @intCast(row)) < self.visibleFontRows()) {
+                if (self.selected_font == @as(usize, @intCast(row)) and !self.confirm_remove) return;
                 self.selected_font = @intCast(row);
                 self.confirm_remove = false;
-            }
-        }
+            } else return;
+        } else return;
         self.render();
     }
 
@@ -192,24 +203,26 @@ const App = struct {
             "Bitmap preview - Install adds every native size");
     }
 
-    fn changeSourceFace(self: *App, direction: i32) void {
-        if (self.source_face_count == 0) return;
+    fn changeSourceFace(self: *App, direction: i32) bool {
+        if (self.source_face_count <= 1) return false;
         if (direction < 0) {
             self.source_face = if (self.source_face == 0) self.source_face_count - 1 else self.source_face - 1;
         } else {
             self.source_face = (self.source_face + 1) % self.source_face_count;
         }
         self.selectSourceFace();
+        return true;
     }
 
-    fn changeInstalledFont(self: *App, direction: i32) void {
-        if (self.font_count == 0) return;
+    fn changeInstalledFont(self: *App, direction: i32) bool {
+        if (self.font_count == 0 or (self.font_count == 1 and !self.confirm_remove)) return false;
         if (direction < 0) {
             self.selected_font = if (self.selected_font == 0) self.font_count - 1 else self.selected_font - 1;
         } else {
             self.selected_font = (self.selected_font + 1) % self.font_count;
         }
         self.confirm_remove = false;
+        return true;
     }
 
     fn installAllFaces(self: *App) void {
@@ -680,8 +693,4 @@ fn equalsIgnoreCase(left: []const u8, right: []const u8) bool {
 
 fn upper(ch: u8) u8 {
     return if (ch >= 'a' and ch <= 'z') ch - 32 else ch;
-}
-
-fn clamp(value: i32, min: i32, max: i32) i32 {
-    return @min(max, @max(min, value));
 }

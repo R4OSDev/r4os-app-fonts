@@ -34,3 +34,15 @@ ein 64-Byte-FON mit e_lfanew=FFFFFFFF sowie gepolsterte WOFF/WOFF2-Daten mit
 logischer Laenge 18/19. Vier gebuendelte Hostfaelle, bestehender R4FONT-Build
 und Vendorcheck; ein kurzer SMP4-Gast mit privatem Katalog aus einer gueltigen
 und vier fehlerhaften Dateien inklusive Reload. Keine Font-Profile/Langlaeufe.
+
+Ereignisgesteuerter Leerlauf (0.81.18)
+-----------------------------------
+FONTS 0.1.5 verwendet den SDK-EventLoop mit leerer Timerliste und
+timeoutForever. Anstehende GUI-Ereignisse werden vor dem Wait verarbeitet;
+Close und Waitfehler verlassen die Runfunktion samt Freigabe der Quelldaten.
+Resize und Fontwechsel zeichnen neu, irrelevante Klicks nicht. Die vom
+Desktop gelieferte Clientgroesse wird ohne obere Begrenzung uebernommen.
+Freigelegte Fenster verwenden den gespeicherten Desktopframe; ein eigenes
+Exposeereignis existiert im aktuellen GUI-Vertrag nicht. Der gemeinsame
+Kernel-Activity-Wait behaelt seinen bisherigen internen 250-ms-Abschnitt;
+der anwendungseigene Zwei-Tick-Polltimer entfaellt vollstaendig.
