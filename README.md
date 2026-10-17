@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.1.6`
+- Version: `0.1.7`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/FONTS.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
