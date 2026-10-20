@@ -8,6 +8,18 @@ pub fn build(b: *std.Build) void {
     const libraries_dep = b.dependencyFromBuildZig(libraries_build, .{});
     const sdk = sdk_build.sdk(b, sdk_dep, .{});
     _ = sdk.addR4MFWithOptions(b.path("module.R4MF"), .{
-        .zig_module_roots = &.{libraries_dep.namedLazyPath("r4font_font_tools")},
+        .zig_module_roots = &.{
+            libraries_dep.namedLazyPath("r4font_font_tools"),
+            libraries_dep.namedLazyPath("r4std_legacy_tables"),
+            libraries_dep.namedLazyPath("r4std_console_text"),
+        },
+    });
+    _ = sdk.addR4MFWithOptions(b.path("Tests/TextConsumer/module.R4MF"), .{
+        .zig_module_roots = &.{
+            b.path("src/main.zig"),
+            libraries_dep.namedLazyPath("r4font_font_tools"),
+            libraries_dep.namedLazyPath("r4std_legacy_tables"),
+            libraries_dep.namedLazyPath("r4std_console_text"),
+        },
     });
 }

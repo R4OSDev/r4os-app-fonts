@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.1.7`
+- Version: `0.1.8`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/FONTS.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
@@ -38,6 +38,23 @@ Detailed German technical notes from the migration are preserved in
 Original R4OS material is licensed under Apache License 2.0. See `LICENSE`
 and `NOTICE`. Any repository-specific external material is documented in
 `THIRD_PARTY_NOTICES.md`.
+
+FON import maps ANSI Windows-1252 and the explicit R4OS OEM CP437 policy to
+Unicode before writing R4F. Other/ambiguous charsets fail visibly. Source
+preview text is UTF-8; undefined 1252 slots are omitted. Static helpers reuse
+R4STD's original mapping tables. Existing incorrectly mapped imports need
+reimporting; the R4FONT dynamic decoder API remains unchanged.
+
+Explicit `/TEXTTEST` reloads all 14 stock faces, checks real block/Euro rows,
+imports three small independent FNT fixtures and compares their preview and
+native glyph pixels. It removes its private installed font and exports the
+successful result to `C:\TEMP\FONT08540.TXT`. `/SELFTEST` retains the optional
+six historical local source-font test; its source files are not distributed.
+The ordinary hosted GUI launch needs its desktop host. For an early headless
+guest, Tests/TextConsumer builds FONTTEST.R4X as a console-only fixture with
+IMAGE_SCOPE=none. It imports and calls this exact application's entry point;
+it does not contain an alternate importer, preview or glyph test. Supply
+/TEXTTEST or /SELFTEST explicitly. Product GUI behavior remains unchanged.
 
 
 Input bounds and ownership (0.78.65)

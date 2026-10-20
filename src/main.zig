@@ -30,6 +30,7 @@ const AppApi = struct {
 
 pub fn r4_app_main(r4_app: *r4os.App) i32 {
     var ctx = AppApi.init(r4_app) orelse return r4os.abi.err_no_group;
+    if (hasArg(ctx.sys.argsRaw(), "/TEXTTEST")) return runTextTest(&ctx);
     if (hasArg(ctx.sys.argsRaw(), "/SELFTEST")) return runSelfTest(&ctx);
     var app = App{ .ctx = &ctx };
     return app.run();
@@ -189,7 +190,7 @@ const App = struct {
             self.ctx.allocator,
             bytes,
             self.source_face,
-            "AaBbCc 123",
+            "AaBb \xc3\xbc \xe2\x82\xac \xe2\x94\x80",
             self.source_preview_pixels[0..],
             source_preview_width,
             source_preview_height,
@@ -453,6 +454,99 @@ const App = struct {
         self.source_bytes = null;
     }
 };
+
+fn runTextTest(ctx: *AppApi) i32 {
+    const names = [_][]const u8{
+        "TERMINAL8.R4F", "TERMINAL16.R4F", "R4SANS08.R4F", "R4SANS08B.R4F",
+        "R4SANS12.R4F",  "R4SANS12B.R4F",  "R4SANS16.R4F", "R4SANS16B.R4F",
+        "R4SANS24.R4F",  "R4SANS24B.R4F",  "R4SANS32.R4F", "R4SANS32B.R4F",
+        "R4SANS40.R4F",  "R4SANS40B.R4F",
+    };
+    if (ctx.draw.fontReload() < 0) return fail(ctx, "text-reload");
+    var found = [_]bool{false} ** names.len;
+    const count = ctx.draw.fontCount();
+    for (0..@intCast(count)) |index| {
+        var info: r4os.abi.GuiFontInfo = .{};
+        if (ctx.draw.fontInfo(@intCast(index), &info) <= 0) return fail(ctx, "text-info");
+        for (names, 0..) |name, slot| {
+            if (!equalsIgnoreCase(baseName(fixedSpan(info.path[0..])), baseName(name))) continue;
+            if (found[slot] or info.glyph_count != 257) return fail(ctx, "text-coverage");
+            found[slot] = true;
+            var block: r4os.abi.GuiGlyphBitmap = .{};
+            if (ctx.draw.fontGlyphBitmap(info.id, 0x2588, &block) != 0 or block.width == 0 or block.width > 40 or block.height == 0 or block.height > 40) return fail(ctx, "text-block-shape");
+            const mask = (@as(u64, 1) << @intCast(block.width)) - 1;
+            for (0..block.height) |row| {
+                if (block.rows[row] != mask or ctx.draw.fontGlyphRow(info.id, 0x2588, @intCast(row)) != mask) return fail(ctx, "text-block-pixels");
+            }
+            if (slot < 2) {
+                const expected = [_]u8{ 0x1e, 0x30, 0x7c, 0x30, 0x7c, 0x30, 0x1e, 0 };
+                const scale: usize = if (slot == 0) 1 else 2;
+                for (expected, 0..) |bits, y| for (0..scale) |n| {
+                    if (ctx.draw.fontGlyphRow(info.id, 0x20ac, @intCast(y * scale + n)) != @bitReverse(bits)) return fail(ctx, "text-euro-pixels");
+                };
+            }
+        }
+    }
+    for (found) |present| if (!present) return fail(ctx, "text-stock-missing");
+
+    // Independent one-glyph source fixture: the A-shaped pixels must be
+    // selected through the converted Unicode value, not a builtin fallback.
+    const path: [*:0]const u8 = "C:\\R4OS\\FONTS\\_TEXT08540.R4F";
+    if (ctx.sys.fileInfo(path) != null) return fail(ctx, "text-test-path-in-use");
+    var owned = false;
+    defer {
+        if (owned) _ = ctx.sys.fileDelete(path);
+        _ = ctx.draw.fontReload();
+    }
+    const cases = [_]struct { charset: u8, byte: u8, cp: u32, utf8: []const u8 }{
+        .{ .charset = 0xff, .byte = 0x81, .cp = 0xfc, .utf8 = "\xc3\xbc" },
+        .{ .charset = 0xff, .byte = 0xc4, .cp = 0x2500, .utf8 = "\xe2\x94\x80" },
+        .{ .charset = 0, .byte = 0x80, .cp = 0x20ac, .utf8 = "\xe2\x82\xac" },
+    };
+    const expected = [_]u8{ 0x18, 0x24, 0x42, 0x7e, 0x42, 0x42, 0, 0 };
+    for (cases) |c| {
+        var input = [_]u8{0} ** 138;
+        input[1] = 1;
+        input[2] = 138;
+        input[68] = 8;
+        input[74] = 7;
+        input[85] = c.charset;
+        input[86] = 8;
+        input[88] = 8;
+        input[91] = 8;
+        input[93] = 8;
+        input[95] = c.byte;
+        input[96] = c.byte;
+        input[99] = 1;
+        input[105] = 130;
+        input[113] = 118;
+        input[130] = 'T';
+        @memcpy(input[118..126], &expected);
+        var preview: [64]u32 = undefined;
+        _ = font_import.rasterizePreview(ctx.allocator, &input, 0, c.utf8, &preview, 8, 8) catch return fail(ctx, "text-preview");
+        for (preview, 0..) |pixel, i| {
+            const ink = expected[i / 8] & (@as(u8, 0x80) >> @intCast(i % 8)) != 0;
+            if (pixel != @as(u32, if (ink) 0 else 0xffffff)) return fail(ctx, "text-preview-pixels");
+        }
+        const output = font_import.convert(ctx.allocator, &input, "TEXTTEST.FNT", 0) catch return fail(ctx, "text-convert");
+        defer ctx.allocator.free(output);
+        owned = true;
+        if (ctx.sys.fileWrite(path, output) != @as(i32, @intCast(output.len)) or ctx.draw.fontReload() < 0) return fail(ctx, "text-install");
+        var installed: ?u32 = null;
+        for (0..@intCast(ctx.draw.fontCount())) |index| {
+            var info: r4os.abi.GuiFontInfo = .{};
+            if (ctx.draw.fontInfo(@intCast(index), &info) > 0 and equalsIgnoreCase(fixedSpan(info.path[0..]), std.mem.span(path))) installed = info.id;
+        }
+        const id = installed orelse return fail(ctx, "text-installed-id");
+        for (expected, 0..) |bits, y| if (ctx.draw.fontGlyphRow(id, c.cp, @intCast(y)) != @bitReverse(bits)) return fail(ctx, "text-imported-pixels");
+        if (ctx.sys.fileDelete(path) < 0 or ctx.draw.fontReload() < 0) return fail(ctx, "text-cleanup");
+        owned = false;
+    }
+    const result = "[FONT08540] PASS stock_faces=14 scalars_per_face=257 imported=3 preview_pixels=192 native_import_rows=24 block_and_euro=verified\r\n";
+    if (ctx.sys.fileWrite("C:\\TEMP\\FONT08540.TXT", result) != result.len) return fail(ctx, "text-result-export");
+    ctx.sys.println("FONTS texttest OK");
+    return 0;
+}
 
 fn runSelfTest(ctx: *AppApi) i32 {
     const sources = [_]struct {
