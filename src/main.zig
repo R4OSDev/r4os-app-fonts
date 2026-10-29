@@ -51,6 +51,7 @@ const App = struct {
     font_labels: [max_fonts][label_capacity]u8 = .{.{0} ** label_capacity} ** max_fonts,
     font_count: usize = 0,
     selected_font: usize = 0,
+    mouse_armed: bool = false,
     confirm_remove: bool = false,
     status: [80]u8 = .{0} ** 80,
 
@@ -95,7 +96,12 @@ const App = struct {
                 self.render();
             },
             .key_down => self.handleKey(r4os.gui.eventKey(event)),
-            .mouse_up => self.handleClick(event.x, event.y),
+            .mouse_down => self.mouse_armed = true,
+            .input_reset, .focus_lost => self.mouse_armed = false,
+            .mouse_up => if (self.mouse_armed) {
+                self.mouse_armed = false;
+                self.handleClick(event.x, event.y);
+            },
             else => {},
         }
     }
