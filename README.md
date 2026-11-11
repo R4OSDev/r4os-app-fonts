@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.1.8`
+- Version: `0.1.12`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/FONTS.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
@@ -77,3 +77,15 @@ font allocation. Input, font changes and resize trigger repaint; irrelevant
 clicks retain the current frame. The app uses the full hosted client size.
 The shared kernel activity wait still has its existing 250-ms safety slice
 and wakes for other desktop activity; Fonts adds no periodic idle timer.
+
+API migration 0.90.67
+---------------------
+The normal App2 entry uses SDK201/Contract93/Libraries57 and Query2 platform
+imports. Font decoding and conversion keep their independent library ABI.
+The common argument cursor accepts whole quoted UTF8 source paths and reports
+invalid or oversized arguments. Bounded source reads compare full metadata.
+Font publication rebuilds layout, restores selection by whole path and clears
+pending removal confirmation. Remove binds the full current metadata and
+catalog revision before a second confirmation. The existing file-delete
+operation acknowledges removal. FONTTEST0.1.2 calls this exact App2 source.
+Invoke the normal FONTS.R4X text oracle with /TEXTTEST /CONSOLE over SSH.

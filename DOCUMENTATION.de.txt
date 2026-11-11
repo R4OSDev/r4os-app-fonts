@@ -46,3 +46,14 @@ Freigelegte Fenster verwenden den gespeicherten Desktopframe; ein eigenes
 Exposeereignis existiert im aktuellen GUI-Vertrag nicht. Der gemeinsame
 Kernel-Activity-Wait behaelt seinen bisherigen internen 250-ms-Abschnitt;
 der anwendungseigene Zwei-Tick-Polltimer entfaellt vollstaendig.
+
+API-Migration 0.90.67
+---------------------
+Fonts12 und dieselbe Quellfixture FONTTEST2 verwenden App2/Query2 aus dem
+normalen SDK201/Contract93/Library57. ArgumentCursor uebernimmt ganze
+quotierte UTF8-Pfade. Begrenzte Quelldateien werden mit ganzen Metadaten vor
+und nach dem Lesen gebunden. Fontpublikation verwirft die Loeschbestaetigung,
+erhaelt die Auswahl per Pfad und baut Canvas/Layout neu auf. Entfernen bindet
+die volle Dateiidentitaet und Katalogrevision vor der erneuten Bestaetigung.
+Die bestehende pfadbasierte Dateiloeschoperation liefert ihre Quittung.
+Der normale SSH-Texttest verwendet /TEXTTEST /CONSOLE.

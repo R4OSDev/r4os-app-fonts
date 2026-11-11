@@ -1,8 +1,9 @@
 R4OS_MODULE_MANIFEST=2
 KIND=R4X
 NAME=FONTS
-VERSION=0.1.11
+VERSION=0.1.12
 LANGUAGE=Zig
+SDK_PROFILE=r4os-zig-generation2
 SOURCE=src/main.zig
 ZIG_MODULE=font_tools:../../Libraries/R4FONT/Bindings/Zig/font_tools.zig
 ZIG_MODULE=r4std_legacy_tables:../../Libraries/R4STD/Source/codec_tables.zig
@@ -11,7 +12,7 @@ ENTRY_MODE=app
 APP_CLASS=gui
 TARGET=/R4OS/SOFTWARE/DESKTOP/FONTS.R4X
 IMAGE_SCOPE=full
-IMPORT=R4SYS:Query:1
-IMPORT=R4DESK:Query:1
-IMPORT=R4DRAW:Query:1
+IMPORT=R4SYS:Query2:2
+IMPORT=R4DESK:Query2:2
+IMPORT=R4DRAW:Query2:2
 META=desktop.launch=hosted

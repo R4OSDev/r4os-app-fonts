@@ -1,8 +1,9 @@
 R4OS_MODULE_MANIFEST=2
 KIND=R4X
 NAME=FONTTEST
-VERSION=0.1.1
+VERSION=0.1.2
 LANGUAGE=Zig
+SDK_PROFILE=r4os-zig-generation2
 SOURCE=main.zig
 ZIG_MODULE=fonts_app:../../src/main.zig
 ZIG_MODULE=font_tools:../../../../Libraries/R4FONT/Bindings/Zig/font_tools.zig
@@ -12,7 +13,7 @@ ENTRY_MODE=app
 APP_CLASS=console
 TARGET=/TEMP/FONTTEST.R4X
 IMAGE_SCOPE=none
-IMPORT=R4SYS:Query:1
-IMPORT=R4DESK:Query:1
-IMPORT=R4DRAW:Query:1
+IMPORT=R4SYS:Query2:2
+IMPORT=R4DESK:Query2:2
+IMPORT=R4DRAW:Query2:2
 META=fixture.role=font-text-source-consumer

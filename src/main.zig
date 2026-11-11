@@ -13,13 +13,15 @@ const source_preview_width: u16 = 192;
 const source_preview_height: u16 = 32;
 
 const AppApi = struct {
+    app: *const r4os.App2,
     sys: r4os.r4sys.Context,
     desk: r4os.r4desk.Context,
     draw: r4os.r4draw.Context,
     allocator: std.mem.Allocator,
 
-    fn init(app: *r4os.App) ?AppApi {
+    fn init(app: *r4os.App2) ?AppApi {
         return .{
+            .app = app,
             .sys = app.system(),
             .desk = app.desktop() orelse return null,
             .draw = app.drawing() orelse return null,
@@ -28,7 +30,7 @@ const AppApi = struct {
     }
 };
 
-pub fn r4_app_main(r4_app: *r4os.App) i32 {
+pub fn r4_app_main(r4_app: *r4os.App2) i32 {
     var ctx = AppApi.init(r4_app) orelse return r4os.abi.err_no_group;
     if (hasArg(ctx.sys.argsRaw(), "/TEXTTEST")) return runTextTest(&ctx);
     if (hasArg(ctx.sys.argsRaw(), "/SELFTEST")) return runSelfTest(&ctx);
@@ -48,11 +50,14 @@ const App = struct {
     source_preview: ?font_import.Preview = null,
     source_preview_pixels: [source_preview_width * source_preview_height]u32 = .{0x00FFFFFF} ** (source_preview_width * source_preview_height),
     font_ids: [max_fonts]u32 = .{0} ** max_fonts,
+    font_paths: [max_fonts][path_capacity]u8 = @splat(@splat(0)),
     font_labels: [max_fonts][label_capacity]u8 = .{.{0} ** label_capacity} ** max_fonts,
     font_count: usize = 0,
     selected_font: usize = 0,
     mouse_armed: bool = false,
     confirm_remove: bool = false,
+    remove_metadata: ?r4os.abi.FileMetadata2 = null,
+    remove_font_revision: u32 = 0,
     status: [80]u8 = .{0} ** 80,
 
     fn run(self: *App) i32 {
@@ -92,7 +97,10 @@ const App = struct {
                 self.render();
             },
             .font_changed => {
+                const confirmation_cleared = self.confirm_remove;
                 self.loadInstalled();
+                if (confirmation_cleared) self.setStatus("Font catalogue changed. Removal confirmation cleared");
+                self.updateMetrics();
                 self.render();
             },
             .key_down => self.handleKey(r4os.gui.eventKey(event)),
@@ -145,28 +153,33 @@ const App = struct {
             if (row >= 0 and @as(usize, @intCast(row)) < self.visibleFontRows()) {
                 if (self.selected_font == @as(usize, @intCast(row)) and !self.confirm_remove) return;
                 self.selected_font = @intCast(row);
-                self.confirm_remove = false;
+                self.clearRemoval();
             } else return;
         } else return;
         self.render();
     }
 
     fn loadSourceFromArgs(self: *App) void {
-        const args = self.ctx.sys.argsRaw();
-        const path = firstArg(args, self.source_path[0..]);
+        const path = firstArg(self.ctx.app.args(), &self.source_path) catch {
+            self.setStatus("Font source path is invalid or too long");
+            return;
+        };
         if (path.len == 0) {
             self.setStatus("Open a .FON file from Explorer to install it");
             return;
         }
-        const info = self.ctx.sys.fileInfo(zptr(self.source_path[0..])) orelse {
-            self.setStatus("The selected font file could not be read");
-            return;
+        const info = switch (r4os.metadata2.info(&self.ctx.app.context, zptr(&self.source_path))) {
+            .found => |value| value,
+            else => {
+                self.setStatus("The selected font file could not be read");
+                return;
+            },
         };
-        if (info.is_dir != 0 or info.size == 0 or info.size > max_source_bytes) {
+        if (info.flags & r4os.abi.file_metadata2_flag_directory != 0 or info.flags & r4os.abi.file_metadata2_flag_byte_size_valid == 0 or info.byte_size == 0 or info.byte_size > max_source_bytes) {
             self.setStatus("Font source is empty or too large");
             return;
         }
-        const bytes = self.ctx.allocator.alloc(u8, @intCast(info.size)) catch {
+        const bytes = self.ctx.allocator.alloc(u8, @intCast(info.byte_size)) catch {
             self.setStatus("Not enough memory for font source");
             return;
         };
@@ -174,6 +187,19 @@ const App = struct {
         if (read != @as(i32, @intCast(bytes.len))) {
             self.ctx.allocator.free(bytes);
             self.setStatus("Font source read failed");
+            return;
+        }
+        const after = switch (r4os.metadata2.info(&self.ctx.app.context, zptr(&self.source_path))) {
+            .found => |value| value,
+            else => {
+                self.ctx.allocator.free(bytes);
+                self.setStatus("Font source identity became unavailable");
+                return;
+            },
+        };
+        if (!std.meta.eql(info, after)) {
+            self.ctx.allocator.free(bytes);
+            self.setStatus("Font source changed while reading");
             return;
         }
         self.source_bytes = bytes;
@@ -228,7 +254,7 @@ const App = struct {
         } else {
             self.selected_font = (self.selected_font + 1) % self.font_count;
         }
-        self.confirm_remove = false;
+        self.clearRemoval();
         return true;
     }
 
@@ -252,7 +278,17 @@ const App = struct {
                 self.setStatus("Cannot create target font file name");
                 return;
             };
-            if (self.ctx.sys.fileInfo(zptr(targets[face_index][0..])) == null) new_faces += 1;
+            switch (r4os.metadata2.info(&self.ctx.app.context, zptr(&targets[face_index]))) {
+                .missing => new_faces += 1,
+                .found => |info| if (info.flags & r4os.abi.file_metadata2_flag_directory != 0) {
+                    self.setStatus("Font target is a directory");
+                    return;
+                },
+                .failure => {
+                    self.setStatus("Font target metadata is unavailable");
+                    return;
+                },
+            }
         }
         const catalogue_count = @as(usize, @intCast(self.ctx.draw.fontCount())) -| 1;
         if (catalogue_count + new_faces > max_catalog_fonts) {
@@ -319,33 +355,66 @@ const App = struct {
 
     fn removeSelectedFont(self: *App) void {
         if (self.selected_font == 0 or self.selected_font >= self.font_count) {
+            self.clearRemoval();
             self.setStatus("The built-in font cannot be removed");
             return;
         }
-        if (!self.confirm_remove) {
-            self.confirm_remove = true;
-            self.setStatus("Click Remove again to confirm");
-            return;
-        }
+        const revision = self.ctx.draw.fontRevision();
         var info: r4os.abi.GuiFontInfo = .{};
-        if (self.ctx.draw.fontInfo(self.font_ids[self.selected_font], &info) <= 0) {
+        if (revision == 0 or self.ctx.draw.fontInfo(self.font_ids[self.selected_font], &info) <= 0 or
+            !equalsIgnoreCase(fixedSpan(&info.path), spanZ(&self.font_paths[self.selected_font])))
+        {
+            self.clearRemoval();
             self.setStatus("Selected font is no longer available");
             return;
         }
-        var path: [path_capacity]u8 = .{0} ** path_capacity;
-        copyZ(path[0..], fixedSpan(info.path[0..]));
-        if (!hasSystemFontPrefix(spanZ(path[0..])) or self.ctx.sys.fileDelete(zptr(path[0..])) <= 0) {
+        const path = self.font_paths[self.selected_font];
+        if (!hasSystemFontPrefix(spanZ(&path))) {
+            self.clearRemoval();
             self.setStatus("Cannot remove this installed font");
             return;
         }
-        _ = self.ctx.draw.fontReload();
+        const metadata = switch (r4os.metadata2.info(&self.ctx.app.context, zptr(&path))) {
+            .found => |value| value,
+            else => {
+                self.clearRemoval();
+                self.setStatus("Font file identity is unavailable");
+                return;
+            },
+        };
+        if (metadata.flags & r4os.abi.file_metadata2_flag_identity_valid == 0 or metadata.flags & r4os.abi.file_metadata2_flag_directory != 0 or self.ctx.draw.fontRevision() != revision) {
+            self.clearRemoval();
+            self.setStatus("Font catalogue changed. Select the font again");
+            return;
+        }
+        if (!self.confirm_remove or self.remove_font_revision != revision or !std.meta.eql(self.remove_metadata, @as(?r4os.abi.FileMetadata2, metadata))) {
+            self.confirm_remove = true;
+            self.remove_metadata = metadata;
+            self.remove_font_revision = revision;
+            self.setStatus("Click Remove again to confirm");
+            return;
+        }
+        self.clearRemoval();
+        if (self.ctx.sys.fileDelete(zptr(&path)) <= 0) {
+            self.setStatus("Cannot remove this installed font");
+            return;
+        }
+        const reloaded = self.ctx.draw.fontReload();
         self.selected_font = 0;
-        self.confirm_remove = false;
         self.loadInstalled();
-        self.setStatus("Font removed");
+        self.setStatus(if (reloaded < 0) "Font removed. Catalogue reload failed" else "Font removed");
+    }
+
+    fn clearRemoval(self: *App) void {
+        self.confirm_remove = false;
+        self.remove_metadata = null;
+        self.remove_font_revision = 0;
     }
 
     fn loadInstalled(self: *App) void {
+        const previous = if (self.selected_font < self.font_count) self.font_paths[self.selected_font] else @as([path_capacity]u8, @splat(0));
+        self.clearRemoval();
+        var selected: usize = 0;
         self.font_count = 0;
         const count = @min(@as(usize, @intCast(self.ctx.draw.fontCount())), max_fonts);
         var index: usize = 0;
@@ -353,16 +422,19 @@ const App = struct {
             var info: r4os.abi.GuiFontInfo = .{};
             if (self.ctx.draw.fontInfo(@intCast(index), &info) <= 0) continue;
             if ((info.flags & r4os.abi.gui_font_flag_renderable) == 0) continue;
+            if (!r4os.bounded_text.assignZ(&self.font_paths[self.font_count], fixedSpan(&info.path))) continue;
             self.font_ids[self.font_count] = info.id;
             formatFontLabel(self.font_labels[self.font_count][0..], info);
+            if (previous[0] != 0 and equalsIgnoreCase(spanZ(&previous), spanZ(&self.font_paths[self.font_count]))) selected = self.font_count;
             self.font_count += 1;
         }
         if (self.font_count == 0) {
             self.font_ids[0] = r4os.abi.gui_font_builtin_id;
+            self.font_paths[0] = @splat(0);
             copyZ(self.font_labels[0][0..], "R4OS Builtin 8x8");
             self.font_count = 1;
         }
-        if (self.selected_font >= self.font_count) self.selected_font = 0;
+        self.selected_font = selected;
     }
 
     fn hasInstalledPath(self: *const App, wanted: []const u8) bool {
@@ -498,7 +570,10 @@ fn runTextTest(ctx: *AppApi) i32 {
     // Independent one-glyph source fixture: the A-shaped pixels must be
     // selected through the converted Unicode value, not a builtin fallback.
     const path: [*:0]const u8 = "C:\\R4OS\\FONTS\\_TEXT08540.R4F";
-    if (ctx.sys.fileInfo(path) != null) return fail(ctx, "text-test-path-in-use");
+    switch (r4os.metadata2.info(&ctx.app.context, path)) {
+        .missing => {},
+        else => return fail(ctx, "text-test-path-in-use"),
+    }
     var owned = false;
     defer {
         if (owned) _ = ctx.sys.fileDelete(path);
@@ -578,9 +653,12 @@ fn runSelfTest(ctx: *AppApi) i32 {
         _ = ctx.draw.fontReload();
     }
     for (sources) |source| {
-        const file = ctx.sys.fileInfo(source.path) orelse return fail(ctx, "source-missing");
-        if (file.size == 0 or file.size > max_source_bytes) return fail(ctx, "source-size");
-        const bytes = ctx.allocator.alloc(u8, @intCast(file.size)) catch return fail(ctx, "source-oom");
+        const file = switch (r4os.metadata2.info(&ctx.app.context, source.path)) {
+            .found => |value| value,
+            else => return fail(ctx, "source-missing"),
+        };
+        if (file.flags & r4os.abi.file_metadata2_flag_byte_size_valid == 0 or file.byte_size == 0 or file.byte_size > max_source_bytes) return fail(ctx, "source-size");
+        const bytes = ctx.allocator.alloc(u8, @intCast(file.byte_size)) catch return fail(ctx, "source-oom");
         defer ctx.allocator.free(bytes);
         if (ctx.sys.fileRead(source.path, bytes) != @as(i32, @intCast(bytes.len))) return fail(ctx, "source-read");
         const count = font_import.faceCount(bytes);
@@ -697,18 +775,16 @@ fn writePath(out: []u8, prefix: []const u8, stem: []const u8, face: usize, exten
     @memcpy(out[at .. at + extension.len], extension);
 }
 
-fn firstArg(raw: [*:0]const u8, out: []u8) []const u8 {
-    @memset(out, 0);
-    var at: usize = 0;
-    while (raw[at] == ' ' or raw[at] == '\t') : (at += 1) {}
-    const quote = raw[at] == '"';
-    if (quote) at += 1;
-    var written: usize = 0;
-    while (written + 1 < out.len and raw[at] != 0 and (if (quote) raw[at] != '"' else raw[at] != ' ' and raw[at] != '\t')) : ({
-        at += 1;
-        written += 1;
-    }) out[written] = raw[at];
-    return out[0..written];
+fn firstArg(raw: []const u8, out: []u8) r4os.arguments.Error![]const u8 {
+    var detail: r4os.arguments.Failure = .{};
+    var cursor = try r4os.arguments.ArgCursor.init(raw, .{ .switches = 0 }, &detail);
+    const token = (try cursor.next()) orelse {
+        @memset(out, 0);
+        return out[0..0];
+    };
+    const value = try token.bytes(raw);
+    if (!r4os.bounded_text.assignZ(out, value)) return error.TooLong;
+    return out[0..value.len];
 }
 
 fn baseName(path: []const u8) []const u8 {
@@ -793,4 +869,82 @@ fn equalsIgnoreCase(left: []const u8, right: []const u8) bool {
 
 fn upper(ch: u8) u8 {
     return if (ch >= 'a' and ch <= 'z') ch - 32 else ch;
+}
+
+test "migration font source arguments remain whole UTF8 paths" {
+    var output: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("C:\\TEMP\\Ä中.FON", try firstArg("\"C:\\TEMP\\Ä中.FON\"", &output));
+    @memset(&output, 'Q');
+    const before = output;
+    const too_long = [_]u8{'A'} ** 128;
+    try std.testing.expectError(error.TooLong, firstArg(&too_long, &output));
+    try std.testing.expectEqualSlices(u8, &before, &output);
+    try std.testing.expectError(error.UnclosedQuote, firstArg("\"C:\\TEMP\\A.FON", &output));
+    try std.testing.expectEqualStrings("", try firstArg("", &output));
+}
+
+test "migration font publication retires confirmations and keeps full file identities" {
+    const a = r4os.abi;
+    const Peer = struct {
+        var revision: u32 = 7;
+        var replaced = false;
+        var object: u64 = 0x1_0000_0001;
+        var deletes: usize = 0;
+        fn count() callconv(.c) u32 {
+            return 2;
+        }
+        fn stamp() callconv(.c) u32 {
+            return revision;
+        }
+        fn info(id: u32, output: *a.GuiFontInfo) callconv(.c) i32 {
+            output.* = .{ .id = id, .flags = a.gui_font_flag_renderable, .height = 8 };
+            if (id == 1) {
+                _ = r4os.bounded_text.assignZ(&output.path, if (replaced) "C:\\R4OS\\FONTS\\B.R4F" else "C:\\R4OS\\FONTS\\A.R4F");
+            }
+            return 1;
+        }
+        fn metadata(_: [*:0]const u8, output: *a.FileMetadata2) callconv(.c) i32 {
+            output.* = .{
+                .flags = a.file_metadata2_flag_exists | a.file_metadata2_flag_identity_valid,
+                .identity = .{ .mount_generation = 1, .namespace_generation = 2, .object_hi = object, .object_lo = 3, .flags = a.file_identity2_flag_namespace },
+            };
+            return 1;
+        }
+        fn remove(_: [*:0]const u8) callconv(.c) i32 {
+            deletes += 1;
+            return 1;
+        }
+    };
+    Peer.revision = 7;
+    Peer.replaced = false;
+    Peer.object = 0x1_0000_0001;
+    Peer.deletes = 0;
+    const platform = r4os.platform2;
+    var sys_table = platform.abi.R4XStartR4Sys2{ .file_metadata2 = @intFromPtr(&Peer.metadata), .file_delete = @intFromPtr(&Peer.remove) };
+    var draw_table = platform.abi.R4XStartR4Draw2{ .font_count = @intFromPtr(&Peer.count), .font_info = @intFromPtr(&Peer.info), .font_revision = @intFromPtr(&Peer.stamp) };
+    const imports = [_]platform.abi.R4XStartImport{
+        .{ .group_id = 1, .resolved_version = 2, .table = @intFromPtr(&sys_table) },
+        .{ .group_id = 3, .resolved_version = 2, .table = @intFromPtr(&draw_table) },
+    };
+    const raw = platform.abi.R4XStartContext2{ .import_count = imports.len, .imports = @intFromPtr(&imports) };
+    const context = try platform.Context.init(&raw);
+    var app_context = r4os.App2{ .raw = &raw, .context = context, .memory = undefined, .profile = .desktop };
+    var api = AppApi{ .app = &app_context, .sys = app_context.system(), .desk = undefined, .draw = app_context.drawing().?, .allocator = std.testing.allocator };
+    var app = App{ .ctx = &api };
+    app.loadInstalled();
+    app.selected_font = 1;
+    app.removeSelectedFont();
+    try std.testing.expect(app.confirm_remove);
+    try std.testing.expectEqual(Peer.object, app.remove_metadata.?.identity.object_hi);
+    Peer.object += 1;
+    app.removeSelectedFont();
+    try std.testing.expect(app.confirm_remove);
+    try std.testing.expectEqual(Peer.object, app.remove_metadata.?.identity.object_hi);
+    try std.testing.expectEqual(@as(usize, 0), Peer.deletes);
+    Peer.replaced = true;
+    Peer.revision += 1;
+    app.loadInstalled();
+    try std.testing.expect(!app.confirm_remove and app.remove_metadata == null);
+    try std.testing.expectEqual(@as(usize, 0), app.selected_font);
+    try std.testing.expectEqual(@as(usize, 0), Peer.deletes);
 }
